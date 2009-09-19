@@ -22,7 +22,7 @@ if( not defined($nt) or $@ ) {
 }
 
 # Open output CSV file
-open(CSV, ">twitter.csv") or die "Write error twitter.csv! $!\n";
+open(CSV, ">twitter.csv") or die "Write error 'twitter.csv'! $!\n";
 binmode CSV, ":utf8";
 my $hc = 0;
 my $header = '';
