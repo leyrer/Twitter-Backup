@@ -1,13 +1,22 @@
 #!/usr/bin/perl -w
 
 use strict;
+use FileHandle;
+
 
 my @twitter_fields = qw{ source favorited truncated created_at text user in_reply_to_user_id id in_reply_to_status_id in_reply_to_screen_name};
+my $max_return_tweets = 200;
+
+my $DEBUG = 0;
+my $most_recent_tweet= 0;
+my $returns = 200;
+my $countimported = 0;
+my $outfile;
+
 
 if( $#ARGV < 1) {
-	die "Please provide at least your Twitter username and password als command line arguments!\n";
+	die "Please provide at least your Twitter username and password as command line arguments!\n";
 }
-
 
 # Load Twitter-Module at runtime
 my $twitter_module = "Net::Twitter";
@@ -24,25 +33,17 @@ if( not defined($nt) or $@ ) {
 	die "Could not create Twitter connection! " . $@ . "\n";
 }
 
-# Which user's Tweets should be backuped? Default: logged in user
+# Which user's Tweets should be stored? Default: logged in user
 my $user2backup = (defined($ARGV[2]) and $ARGV[2] ne '') ? $ARGV[2] : $ARGV[0];
 
+# Get last fetched tweet, if possible
+my $csv_file =  $user2backup . "_twitter.csv";
+if ( -f $csv_file ) { # handle existing csv file
+	$most_recent_tweet= get_most_recent_tweet($csv_file);
+}
 
 # Open output CSV file
-open(CSV, ">" . $user2backup . "_twitter.csv") or die "Write error '" .$user2backup . "_twitter.csv'! $!\n";
-binmode CSV, ":utf8";
-my $hc = 0;
-my $header = '';
-foreach my $field (@twitter_fields) {
-	$header .= "\t" if ($hc > 0);
-	$header .= '"' . $field . '"';
-	$hc++;
-}
-print CSV "$header\n";
-
-my $lastid = '';
-my $returns = 200;
-my $countimported = 0;
+$outfile = open_csv($csv_file);
 
 while ($returns == 200) {
 	my $ratelimit = $nt->rate_limit_status();
@@ -51,17 +52,17 @@ while ($returns == 200) {
 		my $statuses;
 		my $localcount = 0;
 		# Handle multiple calls to user_timeline with different "start" Twitter-IDs
-		if( $lastid eq '') {
-			$statuses = $nt->user_timeline({ count => 200, id=> $user2backup });
+		if( $oldest_tweet eq '' and $newest_tweet eq '') {
+			$statuses = $nt->user_timeline({ count => $max_return_tweets, id=> $user2backup });
 		} else {
-			$statuses = $nt->user_timeline({ max_id => $lastid, count => 200, id => $user2backup });
+			$statuses = $nt->user_timeline({ max_id => $oldest_tweet, count => $max_return_tweets, id => $user2backup });
 		}
 		my @erglist = @$statuses;
 		$returns = scalar @erglist;
 	
 		for my $status ( @$statuses ) {
-			$lastid = $status->{'id'};
-			if( $localcount == 0 and $lastid ne '') { # Don't add double entries
+			$oldest_tweet = $status->{'id'};
+			if( $localcount == 0 and $oldest_tweet ne '') { # Don't add double entries
 				$localcount++;
 				next;
 			}
@@ -78,10 +79,12 @@ while ($returns == 200) {
 					$t = $status->{$f};
 				}
 				$t = "" if (not defined $t);
+				$t =~ s/(\n|\r)+/ /gs;	# remove newlines from Tweets
+				$t =~ s/\t/    /g;		# replace tabs with four spaces in Tweets
 				$csv .= '"' . $t . '"';
 				$c++;
 			}
-			print CSV "$csv\n"; 
+			$outfile->print ("$csv\n"); 
 		}
 		print "\t$localcount Tweets imported in this run.\n"; 
 	};
@@ -99,6 +102,59 @@ while ($returns == 200) {
 	sleep(5);
 }
 
-close(CSV);
+$outfile->close;
 print "All in all: $countimported Tweets stored.\n";
 
+exit;
+
+
+
+sub opencsv {
+	my($filename) = @_;
+	my $fh;
+
+	if ( -f $csv_file ) { # handle existing csv file
+		print STDERR "$csv_file exists!\n" if( $DEBUG );
+    	$fh = new FileHandle ">> $filename";
+		die "Couldn't open file '$filename' for writing! Reason: $!\n" if (not defined $fh);
+		$fh->binmode(":utf8");
+	} else {	# create new csv file
+    	$fh = new FileHandle ">> $filename";
+		die "Couldn't open file '$filename' for writing! Reason: $!\n" if (not defined $fh);
+		$fh->binmode(":utf8");
+		&print_csv_header();
+	}
+}
+
+sub get_most_recent_tweet {
+	my ($filename) = @_;
+	my $highest_id = 0;
+
+    my $fh = new FileHandle "< $filename";
+	die "Couldn't open file '$filename' for reading! Reason: $!\n" if (not defined $fh);
+	$fh->binmode(":utf8");
+	$fh->getline();	# Skip the header-line
+
+	while($fh->getline()) {
+		chomp;
+		my @data = split/\t/;
+		$data[7] =~ s/\"//g;
+		$highest_id= $data[6] if( $highest_id eq '' or $data[6] > $highest_id );
+		print "$data[7]\n";
+	}
+	$fh->close;
+	return(highest_id);
+}
+
+sub print_csv_header {
+	my($fh) = @_;
+
+	my $hc = 0;
+	my $header = '';
+	foreach my $field (@twitter_fields) {
+		$header .= "\t" if ($hc > 0);
+		$header .= '"' . $field . '"';
+		$hc++;
+	}
+	$fh->print( "$header\n" );
+}
