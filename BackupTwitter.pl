@@ -3,12 +3,14 @@
 use strict;
 use FileHandle;
 
-
 my @twitter_fields = qw{ source favorited truncated created_at text user in_reply_to_user_id id in_reply_to_status_id in_reply_to_screen_name};
 my $max_return_tweets = 200;
-
+my $twitter_module = "Net::Twitter";
 my $DEBUG = 0;
-my $most_recent_tweet= 0;
+
+my $most_recent_tweet= 1;
+my $newest_tweet = "";
+my $oldest_tweet = "";
 my $returns = 200;
 my $countimported = 0;
 my $outfile;
@@ -19,9 +21,8 @@ if( $#ARGV < 1) {
 }
 
 # Load Twitter-Module at runtime
-my $twitter_module = "Net::Twitter";
 eval "use $twitter_module";
-die "couldn't load module : $!n" if ($@);
+die "couldn't load module $twitter_module. Reason: $!\n" if ($@);
 
 # Initialize Twitter connections
 my $nt = $twitter_module->new(
@@ -39,11 +40,11 @@ my $user2backup = (defined($ARGV[2]) and $ARGV[2] ne '') ? $ARGV[2] : $ARGV[0];
 # Get last fetched tweet, if possible
 my $csv_file =  $user2backup . "_twitter.csv";
 if ( -f $csv_file ) { # handle existing csv file
-	$most_recent_tweet= get_most_recent_tweet($csv_file);
+	$most_recent_tweet = get_most_recent_tweet($csv_file);
 }
 
 # Open output CSV file
-$outfile = open_csv($csv_file);
+$outfile = &opencsv($csv_file);
 
 while ($returns == 200) {
 	my $ratelimit = $nt->rate_limit_status();
@@ -53,9 +54,13 @@ while ($returns == 200) {
 		my $localcount = 0;
 		# Handle multiple calls to user_timeline with different "start" Twitter-IDs
 		if( $oldest_tweet eq '' and $newest_tweet eq '') {
-			$statuses = $nt->user_timeline({ count => $max_return_tweets, id=> $user2backup });
+			$statuses = $nt->user_timeline({ count => $max_return_tweets,
+					since_id	=> $most_recent_tweet,
+					id			=> $user2backup });
 		} else {
-			$statuses = $nt->user_timeline({ max_id => $oldest_tweet, count => $max_return_tweets, id => $user2backup });
+			$statuses = $nt->user_timeline({ max_id => $oldest_tweet, count => $max_return_tweets,
+					since_id	=> $most_recent_tweet,
+					id => $user2backup });
 		}
 		my @erglist = @$statuses;
 		$returns = scalar @erglist;
@@ -90,7 +95,7 @@ while ($returns == 200) {
 	};
 
 	if ( my $err = $@ ) { # errorhandling
-		close(CSV);
+		$outfile->close;
 		print "All in all: $countimported Tweets stored.\n";
 		die $@ unless blessed $err && $err->isa('Net::Twitter::Error');
 
@@ -124,26 +129,26 @@ sub opencsv {
 		$fh->binmode(":utf8");
 		&print_csv_header();
 	}
+	return($fh);
 }
 
 sub get_most_recent_tweet {
 	my ($filename) = @_;
-	my $highest_id = 0;
+	my $highest_id = 1;
 
     my $fh = new FileHandle "< $filename";
 	die "Couldn't open file '$filename' for reading! Reason: $!\n" if (not defined $fh);
 	$fh->binmode(":utf8");
 	$fh->getline();	# Skip the header-line
 
-	while($fh->getline()) {
+	while($_ = $fh->getline()) {
 		chomp;
 		my @data = split/\t/;
-		$data[7] =~ s/\"//g;
-		$highest_id= $data[6] if( $highest_id eq '' or $data[6] > $highest_id );
-		print "$data[7]\n";
+		$data[6] =~ s/\"//g;
+		$highest_id = $data[6] if( $highest_id eq '' or $data[6] > $highest_id );
 	}
 	$fh->close;
-	return(highest_id);
+	return($highest_id);
 }
 
 sub print_csv_header {
