@@ -52,7 +52,7 @@ print STDERR "Open output file ...\n" if($DEBUG);
 $outfile = &opencsv($csv_file);
 
 print STDERR "Fetch & store Tweets ...\n" if($DEBUG);
-while ($tweets_returned == 200) {
+while ($tweets_returned == $tweet_parm{'max_return'}) {
 	my $ratelimit = $nt->rate_limit_status();
 	print "\nRemaining API calls: " . $ratelimit->{'remaining_hits'} . "/" . $ratelimit->{'hourly_limit'} . " (reset at " . $ratelimit->{'reset_time'} . ")\n" if($DEBUG);
 
@@ -76,7 +76,7 @@ while ($tweets_returned == 200) {
 		&writestatusmessage($status, $outfile);
 	}
 	print "\t$localcount Tweets imported in this run.\n" if($DEBUG); 
-	sleep(5) if( $tweets_returned == 200);
+	sleep(5) if( $tweets_returned == $tweet_parm{'max_return'});
 }
 
 $outfile->close;
