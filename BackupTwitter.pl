@@ -5,8 +5,7 @@ use FileHandle;
 
 my $DEBUG = 0;
 my $twitter_module = "Net::Twitter";
-my @twitter_fields = qw{ source favorited truncated created_at text user in_reply_to_user_id id in_reply_to_status_id in_reply_to_screen_name geo };
-
+my @twitter_fields = qw{ source favorited truncated created_at user in_reply_to_user_id id in_reply_to_status_id in_reply_to_screen_name text geo };
 
 my %tweet_parm = (
 	most_recent	=> 1,
@@ -23,6 +22,7 @@ if( $#ARGV < 1) {
 	die "Please provide at least your Twitter username and password as command line arguments!\n";
 }
 
+print STDERR "Initialize Twitter connections ...\n" if($DEBUG);
 # Load Twitter-Module at runtime
 eval "use $twitter_module";
 die "couldn't load module $twitter_module. Reason: $!\n" if ($@);
@@ -40,15 +40,18 @@ if( not defined($nt) or $@ ) {
 # Which user's Tweets should be stored? Default: logged in user
 my $user2backup = (defined($ARGV[2]) and $ARGV[2] ne '') ? $ARGV[2] : $ARGV[0];
 
+print STDERR "Get last fetched Tweet ...\n" if($DEBUG);
 # Get last fetched tweet, if possible
 my $csv_file =  $user2backup . "_twitter.csv";
 if ( -f $csv_file ) { # handle existing csv file
 	$tweet_parm{'most_recent'} = get_most_recent_tweet($csv_file);
 }
 
+print STDERR "Open output file ...\n" if($DEBUG);
 # Open output CSV file
 $outfile = &opencsv($csv_file);
 
+print STDERR "Fetch & store Tweets ...\n" if($DEBUG);
 while ($tweets_returned == 200) {
 	my $ratelimit = $nt->rate_limit_status();
 	print "\nRemaining API calls: " . $ratelimit->{'remaining_hits'} . "/" . $ratelimit->{'hourly_limit'} . " (reset at " . $ratelimit->{'reset_time'} . ")\n" if($DEBUG);
@@ -58,21 +61,22 @@ while ($tweets_returned == 200) {
 	my $localcount = 0;
 	for my $status ( @$statuses ) {
 		$tweet_parm{'oldest'} = $status->{'id'};
+
+		my @erglist = @$statuses;
+		$tweets_returned = scalar @erglist;
+
 		if( $localcount == 0 and $tweet_parm{'oldest'} ne '') { # Don't add double entries in this 'edge' case
 			$localcount++;
 			next;
 		}
 
-		my @erglist = @$statuses;
-		$tweets_returned = scalar @erglist;
 		$localcount++;
 		$countimported++;
 
 		&writestatusmessage($status, $outfile);
 	}
 	print "\t$localcount Tweets imported in this run.\n" if($DEBUG); 
-	print "Sleeping 5 seconds (just in case) ...\n" if($DEBUG);
-	sleep(5);
+	sleep(5) if( $tweets_returned == 200);
 }
 
 $outfile->close;
@@ -84,16 +88,6 @@ exit;
 
 sub writestatusmessage {
 	my($status, $fh) = @_;
-
-# "source"	"favorited"	"truncated"	"created_at"	"user"	"in_reply_to_user_id"	"id"	"in_reply_to_status_id"	"in_reply_to_screen_name"	"text"
-# "<a href="http://www.twhirl.org/" rel="nofollow">twhirl</a>"	"0"	"0"	"Sat Sep 19 09:19:36 +0000 2009"	"3192451"	""	"4099540746"	""	""	"Klaus Schulze, Lisa Gerrard: Elektronik-Pioniere DR.mp3 http://bit.ly/Z1pA4 1977: http://bit.ly/FUKkj (via @alohas, @Grawuhu) #fb"
-# "<a href="http://www.twhirl.org/" rel="nofollow">twhirl</a>"	"0"	"0"	"Sat Sep 19 09:24:56 +0000 2009"	"Playing around with git, vim and twitter to the sounds of Kraftwerk. #menschmaschine"	"3192451"	""	"4099587504"	""	""
-	
-	print $status . "\n";
-	foreach (keys %$status) {
-		print "\tKEY: $_\n";
-	}
-	exit;
 
 	# Code for CSV export
 	my $csv = '';
@@ -157,7 +151,6 @@ sub opencsv {
 	my $fh;
 
 	if ( -f $csv_file ) { # handle existing csv file
-		print STDERR "$csv_file exists!\n" if( $DEBUG );
     	$fh = new FileHandle ">> $filename";
 		die "Couldn't open file '$filename' for writing! Reason: $!\n" if (not defined $fh);
 		$fh->binmode(":utf8");
